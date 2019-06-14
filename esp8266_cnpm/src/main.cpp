@@ -24,11 +24,11 @@ SoftwareSerial thisSerial(RX, TX, false, 256);
 //Khởi tạo lệnh
 SerialCommands sCmd(&thisSerial, serial_command_buffer_, sizeof(serial_command_buffer_), "\r\n", " "); // Khai báo biến sử dụng thư viện Serial Command
 //Khởi tạo client socket io
-SocketIoClient client;                                        //Khai bao socket client
-char host[] = "192.168.1.33";                                 //Địa chỉ IP socket server
-int port = 3000;                                              //Port của server
-const int FW_VERSION = 1245;                                  //version firmware
-const char *fwUrlBase = "http://192.168.1.33:3000/firmware/"; //đường dẫn chứa folder firmware
+SocketIoClient client;                                       //Khai bao socket client
+char host[] = "192.168.1.7";                                 //Địa chỉ IP socket server
+int port = 3000;                                             //Port của server
+const int FW_VERSION = 1245;                                 //version firmware
+const char *fwUrlBase = "http://192.168.1.7:3000/firmware/"; //đường dẫn chứa folder firmware
 
 //========================= CHẾ ĐỘ ĐIỂM TRUY CẬP (KHI KO TÌM ĐC WIFI NÀO) ======================================
 // Set web server port number to 80
@@ -42,67 +42,6 @@ String header;
 WiFiManager wifiManager;
 
 // Khai báo các xử lý:
-//===================THÔNG TIN CHUNG=======================================
-//gửi yêu cầu lấy thông tin cho arduino
-void getInfo(const char *payload, size_t length)
-{
-  Serial.println("->>>getINFO {}");
-  thisSerial.println("getINFO {}"); //gửi tên lệnh
-}
-
-//Phản hồi với socket server
-void resInfo(SerialCommands *sender)
-{
-  const char *port_str = sender->Next();
-  if (port_str == NULL)
-  {
-    Serial.println("ERROR NO_PORT");
-    return;
-  }
-
-  //Xuất ra monitor
-  Serial.print("<<<- ");
-  Serial.println(port_str);
-
-  //Gửi cho socket server
-  client.emit("resInfomation", port_str);
-}
-
-//tao lenh rieng
-SerialCommand resInfo_("resINFO", resInfo);
-
-//===================MÁY BƠM=======================================
-//Set mode cho máy bơm
-void setPumbMode(const char *payload, size_t length)
-{
-  Serial.println("->>>setPUMB {}");
-  thisSerial.println("setPUMB {}"); //gửi tên lệnh
-}
-
-//Tắt mở máy bơm
-void controlPumb(const char *payload, size_t length)
-{
-  Serial.println("->>>contrPUMB {}");
-  thisSerial.println("contrPUMB {}"); //gửi tên lệnh
-}
-
-//===================== KẾT QUẢ THỰC THI ===========================
-void resResult(SerialCommands *sender)
-{
-  //Lấy data
-  const char *port_str = sender->Next();
-  if (port_str == NULL)
-  {
-    Serial.println("ERROR NO_PORT");
-    return;
-  }
-  Serial.print("<<<-resRESULT ");
-  Serial.println(port_str);
-  client.emit("resResult", port_str);
-}
-
-SerialCommand resResult_("resRESULT", resResult);
-
 //========================SET CLOCK================================
 // Set time via NTP, as required for x.509 validation
 void setClock()
@@ -123,6 +62,130 @@ void setClock()
   Serial.print(F("Current time: "));
   Serial.print(asctime(&timeinfo));
 }
+
+//===================THÔNG TIN CHUNG=======================================
+//gửi yêu cầu lấy thông tin cho arduino
+void getInfo(const char *payload, size_t length)
+{
+  Serial.println("->>>getINFO {}");
+  thisSerial.println("getINFO {}"); //gửi tên lệnh
+}
+
+//Phản hồi với socket server
+void resInfo(SerialCommands *sender)
+{
+  const char *port_str = sender->Next();
+  if (port_str == NULL)
+  {
+    Serial.println("ERROR NO_PORT");
+    client.emit("resError", "{\"status\":\"NoPort\", \"msg\":\"No_port\"}");
+    return;
+  }
+
+  //Xuất ra monitor
+  Serial.print("<<<- ");
+  Serial.println(port_str);
+
+  //Gửi cho socket server
+  client.emit("resInfomation", port_str);
+}
+//tao lenh rieng
+SerialCommand resInfo_("resINFO", resInfo);
+
+//========================MOSITURE===========================================
+void getMositure(const char *payload, size_t length)
+{
+  Serial.println("->>>getMOSI {}");
+  thisSerial.println("getMOSI {}"); //gửi tên lệnh
+}
+//Phản hồi với socket server
+void resMositure(SerialCommands *sender)
+{
+  const char *port_str = sender->Next();
+  if (port_str == NULL)
+  {
+    Serial.println("ERROR NO_PORT");
+    client.emit("resError", "{\"status\":\"NoPort\", \"msg\":\"No_port\"}");
+    return;
+  }
+
+  //Xuất ra monitor
+  Serial.print("<<<- ");
+  Serial.println(port_str);
+
+  //JSON handle
+  const int capacity = JSON_OBJECT_SIZE(7);
+  StaticJsonDocument<capacity> docJson;
+  DeserializationError err = deserializeJson(docJson, port_str);
+
+  if (err)
+  {
+    Serial.print(F("deserializeJson() failed with code "));
+    Serial.println(err.c_str());
+    char msg[strlen("{\"status\":\"\",\"msg\":\"deserializeJson()_failed\"}") + strlen(err.c_str())];
+    sprintf(msg, "{\"status\":\"%s\",\"msg\":\"deserializeJson()_failed\"}", err.c_str());
+    client.emit("resError", msg);
+    return;
+  }
+
+  //Thêm ngày giờ vào
+  setClock();
+  String output;
+  docJson["time"] = asctime(&timeinfo);
+  serializeJson(docJson, output);
+
+  //Gửi cho socket server
+  client.emit("resMositure", output.c_str());
+}
+//tao lenh rieng
+SerialCommand resMositure_("resMOSI", resMositure);
+
+//===================SET COMMAND=======================================
+//Set trạng thái máy bơm và chế độ tưới
+void setCommnand(const char *payload, size_t length)
+{
+  Serial.print("->>>setCMD ");
+  Serial.println(payload);
+  thisSerial.print("setCMD "); //gửi tên lệnh
+  thisSerial.println(payload);
+}
+
+//===================== KẾT QUẢ THỰC THI ===========================
+void resResult(SerialCommands *sender)
+{
+  //Lấy data
+  const char *port_str = sender->Next();
+  if (port_str == NULL)
+  {
+    Serial.println("ERROR NO_PORT");
+    client.emit("resError", "{\"status\":\"NoPort\", \"msg\":\"No_port\"}");
+    return;
+  }
+  Serial.print("<<<-resRESULT ");
+  Serial.println(port_str);
+
+  //JSON handle
+  const int capacity = JSON_OBJECT_SIZE(5);
+  StaticJsonDocument<capacity> docJson;
+  DeserializationError err = deserializeJson(docJson, port_str);
+
+  if (err)
+  {
+    Serial.print(F("deserializeJson() failed with code "));
+    Serial.println(err.c_str());
+    char msg[strlen("{\"status\":\"\",\"msg\":\"deserializeJson()_failed\"}") + strlen(err.c_str())];
+    sprintf(msg, "{\"status\":\"%s\",\"msg\":\"deserializeJson()_failed\"}", err.c_str());
+    client.emit("resERR", msg);
+    return;
+  }
+
+  if (docJson["status"] == "Ok")
+    client.emit("resResult", port_str);
+  else
+    client.emit("resError", port_str);
+}
+
+SerialCommand resResult_("resRESULT", resResult);
 
 //=========================== UPDATE FIRMWARE =========================
 void checkForUpdates()
@@ -169,12 +232,12 @@ void checkForUpdates()
         Serial.println("=> HTTP_UPDATE_NO_UPDATES");
         break;
       }
-      client.emit("resResult", "{\"value\":false,\"msg\":\"Update successed\"}");
+      client.emit("resResult", "{\"status\":\"Ok\",\"msg\":\"Update successed\"}");
     }
     else
     {
       Serial.println("=> Already on latest version");
-      client.emit("resResult", "{\"value\":false,\"msg\":\"Already on latest version\"}");
+      client.emit("resResult", "{\"status\":\"UpdateFailed\",\"msg\":\"Already on latest version\"}");
     }
   }
   else
@@ -182,16 +245,24 @@ void checkForUpdates()
     Serial.print("=> Firmware version check failed, got HTTP response code ");
     Serial.println(httpCode);
     char msg[] = "";
-    sprintf(msg, "{\"value\":false,\"msg\":\"Firmware version check failed, got HTTP response code %d\"}", httpCode);
-    client.emit("resResult", msg);
+    sprintf(msg, "{\"status\":\"UpdateFailed\",\"msg\":\"Firmware version check failed, got HTTP response code %d\"}", httpCode);
+    client.emit("resError", msg);
   }
   httpClient.end();
 }
-void updateFW(const char *payload, size_t length)
+void updateFirmware(const char *payload, size_t length)
 {
-  Serial.print("<<<-updateFW ");
+  Serial.print("<<<-updateFirmware ");
   Serial.println(payload);
   checkForUpdates();
+}
+
+//============================ AUTHORIZATION ==========================
+void getAuthorization(const char *payload, size_t length)
+{
+  char msg[strlen("{\"type\":false,\"mac\":\"\"}") + strlen(WiFi.macAddress().c_str())];
+  sprintf(msg, "{\"type\":false,\"mac\":\"%s\"}", WiFi.macAddress().c_str());
+  client.emit("resAuthorization", msg);
 }
 
 void setup()
@@ -215,18 +286,20 @@ void setup()
   server.begin();
 
   //Lấy đồng hồ
-  setClock();
+  // setClock();
 
   //Với socketserver - lắng nghe socket server ra lệnh
-  client.on("getInfomation", getInfo);
-  client.on("setPumbMode", setPumbMode);
-  client.on("controlPumb", controlPumb);
-  client.on("updateFW", updateFW);
+  client.on("getInfomation", getInfo);             //yêu cầu lấy thông tin của thiết bị Arduino
+  client.on("getMositure", getMositure);           //yêu cầu lấy độ ẩm
+  client.on("setCommand", setCommnand);            //gửi lệnh setting các thông số Arduino
+  client.on("updateFirmware", updateFirmware);     //gửi lệnh update Firmware
+  client.on("getAuthorization", getAuthorization); //xác thực mình là device
   //Kết nối với socket server
   client.begin(host, port);
 
   //Với Arduino
-  sCmd.AddCommand(&resInfo_); //Thêm lệnh đọc thông tin độ ẩm, pumbMode, trạng thái máy bơm
+  sCmd.AddCommand(&resInfo_);     //Thêm lệnh đọc thông tin độ ẩm, pumbMode, trạng thái máy bơm
+  sCmd.AddCommand(&resMositure_); //Lệnh lấy độ ẩm
   sCmd.AddCommand(&resResult_);
 
   //Check update firmware
@@ -241,7 +314,6 @@ void loop()
   {
     //  Kết nối lại!============================
     client.loop();
-
     sCmd.ReadSerial();
     delay(10);
   }

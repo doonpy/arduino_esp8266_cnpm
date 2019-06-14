@@ -12,8 +12,8 @@ const int waterPump = 4;             //Chân máy bơm
 const byte RX = 6;                   // Chân 6 được dùng làm chân RX
 const byte TX = 5;                   // Chân 5 được dùng làm chân TX
 const char serialCommandBuffer[256]; //bộ nhớ đệm dùng cho command
-bool pumbMode = true;                //cờ check xem máy bơm là auto hay manual (true: auto, false: manual)
-
+bool pumbMode = true;                //cờ check xem chế độ tưới là auto hay manual (true: auto, false: manual)
+bool pumbStatus = false;             //cờ check xem máy bơm mở hay tắt
 //Khởi tạo với các chân (LCD)
 // LiquidCrystal_I2C lcd(0x27,16,2);
 
@@ -23,16 +23,37 @@ SoftwareSerial thisSerial(RX, TX);
 SerialCommands sCmd(&thisSerial, serialCommandBuffer, sizeof(serialCommandBuffer), "\r\n", " ");
 
 // Khai báo các xử lý:
+//================== CHECK MOSITURE =================================
+void checkMositure()
+{
+  delay(3000);
+  //Thay đổi độ ẩm nếu có gì khác
+  int temp = analogRead(mositureSensor);
+  temp = map(temp, 0, 1023, 100, 0);
+  if (temp != mositureValue)
+    mositureValue = temp;
+}
+
+//================== AUTO MODE =====================================
+void autoMode()
+{
+  checkMositure();
+  if (mositureValue < 35)
+    digitalWrite(waterPump, HIGH);
+  else
+    digitalWrite(waterPump, LOW);
+}
+
 //===================THÔNG TIN CHUNG=======================================
 void resInfo() //phản hồi yêu cầu độ ẩm của ESP8266
 {
   //Tao doi tuong Json
-  const int BUFFER_SIZE = JSON_OBJECT_SIZE(3);
+  const int BUFFER_SIZE = JSON_OBJECT_SIZE(6);
   String jsonCmd;
   StaticJsonDocument<BUFFER_SIZE> jsonDoc; //Tao doi tuong JsonDoc
-  jsonDoc["mositure"] = mositureValue;
+  jsonDoc["status"] = "Ok";
   jsonDoc["pumbMode"] = pumbMode;
-  jsonDoc["pumbStatus"] = digitalRead(waterPump);
+  jsonDoc["pumbStatus"] = pumbStatus;
   serializeJson(jsonDoc, jsonCmd);          //Convert JSON -> String
   thisSerial.println("resINFO " + jsonCmd); //gửi lệnh
 
@@ -48,8 +69,8 @@ void getInfo(SerialCommands *sender)
   const char *port_str = sender->Next();
   if (port_str == NULL)
   {
-    Serial.println("ERROR NO_PORT");
-    thisSerial.println("resRESULT {\"value\":false,\"msg\":\"ERROR NO_PORT\"}");
+    Serial.println("No_port");
+    thisSerial.println("resRESULT {\"status\":NoPort,\"msg\":\"No_port\"}");
     return;
   }
 
@@ -61,12 +82,21 @@ void getInfo(SerialCommands *sender)
   resInfo();
 }
 
+//Khởi tạo biến nhận lệnh từ ESP8266
+SerialCommand getInfo_("getINFO", getInfo);
+
+//================= MOSITURE =========================
+
 void resMositure() //gửi độ ẩm cho ESP8266 nếu có thay đổi
 {
+  //Check độ ẩm
+  checkMositure();
+
   //Tao doi tuong Json
-  const int BUFFER_SIZE = JSON_OBJECT_SIZE(1);
+  const int BUFFER_SIZE = JSON_OBJECT_SIZE(5);
   String jsonCmd;
   StaticJsonDocument<BUFFER_SIZE> jsonDoc; //Tao doi tuong JsonDoc
+  jsonDoc["status"] = "Ok";
   jsonDoc["value"] = mositureValue;
   serializeJson(jsonDoc, jsonCmd);          //Convert JSON -> String
   thisSerial.println("resMOSI " + jsonCmd); //gửi lệnh
@@ -76,122 +106,90 @@ void resMositure() //gửi độ ẩm cho ESP8266 nếu có thay đổi
   Serial.println("resMOSI " + jsonCmd);
 }
 
-// void getMositure(SerialCommands *sender)
-// {
+void getMositure(SerialCommands *sender)
+{
 
-//   //Lấy data
-//   const char *port_str = sender->Next();
-//   if (port_str == NULL)
-//   {
-//     Serial.println("ERROR NO_PORT");
-//     thisSerial.println("resRESULT {\"value\":false,\"msg\":\"ERROR NO_PORT\"}");
-//     return;
-//   }
+  //Lấy data
+  const char *port_str = sender->Next();
+  if (port_str == NULL)
+  {
+    Serial.println("No_port");
+    thisSerial.println("resRESULT {\"status\":NoPort,\"msg\":\"No_port\"}");
+    return;
+  }
 
-//   //Xuất ra monitor
-//   Serial.print("<<<-getMOSI");
-//   Serial.println(port_str);
+  //Xuất ra monitor
+  Serial.print("<<<-getMOSI");
+  Serial.println(port_str);
 
-//   //Gọi hàm phản hồiy
-//   resInfo();
-// }
+  //Gọi hàm phản hồiy
+  resMositure();
+}
 
 //Khởi tạo biến nhận lệnh từ ESP8266
-SerialCommand getInfo_("getINFO", getInfo);
-// SerialCommand getMositure_("getINFO", getMositure);
+SerialCommand getMositure_("getMOSI", getMositure);
 
-//===================MÁY BƠM=======================================
-//Set mode cho máy bơm
+//=================== FROM ESP8266 =======================================
+//Command handle
 void setCommand(SerialCommands *sender)
 {
   //Lấy data
   const char *port_str = sender->Next();
   if (port_str == NULL)
   {
-    Serial.println("ERROR NO_PORT");
-    Serial.println("->>>resRESULT {\"value\":false,\"msg\":\"ERROR NO_PORT\"}");
-    thisSerial.println("resRESULT {\"value\":false,\"msg\":\"ERROR NO_PORT\"}");
+    Serial.println("No_port");
+    Serial.println("->>>resRESULT {\"status\":NoPort,\"msg\":\"No_port\"}");
+    thisSerial.println("resRESULT {\"status\":NoPort,\"msg\":\"No_port\"}");
+    return;
+  }
+  //Xuất ra monitor
+  Serial.print("<<<-setCMD ");
+  Serial.println(port_str);
+
+  //JSON handle
+  const int capacity = JSON_OBJECT_SIZE(5);
+  StaticJsonDocument<capacity> docJson;
+  DeserializationError err = deserializeJson(docJson, port_str);
+
+  // Serial.println(err.c_str());
+  if (err)
+  {
+    Serial.print(F("deserializeJson() failed with code "));
+    Serial.println(err.c_str());
+    char msg[strlen("{\"status\":\"\",\"msg\":\"deserializeJson()_failed\"}") + strlen(err.c_str())];
+    sprintf(msg, "{\"status\":\"%s\",\"msg\":\"deserializeJson()_failed\"}", err.c_str());
+    thisSerial.print("resRESULT ");
+    thisSerial.println(msg);
     return;
   }
 
-  if (pumbMode == false)
+  //Change
+  if (pumbMode != docJson["pumbMode"])
+    pumbMode = docJson["pumbMode"];
+  if (pumbStatus != docJson["pumbStatus"])
   {
-    Serial.println("<<<-setPUMB {}");
-    pumbMode = true;
-    //Trả lại kết quả
-    Serial.println("->>>resRESULT {\"value\":true,\"msg\":\"Success\"}");
-    thisSerial.println("resRESULT {\"value\":true,\"msg\":\"Success\"}");
+    pumbStatus = docJson["pumbStatus"];
+    //Mở/tắt máy bơm bằng tay
+    if (pumbStatus == true)
+    {
+      if (pumbMode == true)
+        pumbMode = false;
+      digitalWrite(waterPump, HIGH);
+    }
+    else
+      digitalWrite(waterPump, LOW);
   }
-  else
-  {
-    Serial.println("<<<-setPUMB {}");
-    pumbMode = false;
-    //Trả lại kết quả
-    Serial.println("->>>resRESULT {\"value\":true,\"msg\":\"Success\"}");
-    thisSerial.println("resRESULT {\"value\":true,\"msg\":\"Success\"}");
-  }
+
+  char msg[strlen("{\"status\":\"\",\"msg\":\"Success\"}") + strlen(err.c_str())];
+  sprintf(msg, "{\"status\":\"%s\",\"msg\":\"Success\"}", err.c_str());
+  thisSerial.print("resRESULT ");
+  thisSerial.println(msg);
 }
 
-//Tắt mở máy bơm
-void controlPumb(SerialCommands *sender)
-{
-  //Lấy data
-  const char *port_str = sender->Next();
-  if (port_str == NULL)
-  {
-    Serial.println("ERROR NO_PORT");
-    Serial.println("->>>resRESULT {\"value\":false,\"msg\":\"ERROR NO_PORT\"}");
-    thisSerial.println("resRESULT {\"value\":false,\"msg\":\"ERROR NO_PORT\"}");
-    return;
-  }
+// -> set cho tớ các biến như thế này
+SerialCommand setCommand_("setCMD", setCommand);
 
-  //Tắt chế độ bơm auto
-  if (pumbMode == true)
-    pumbMode = false;
-
-  //control thôi
-  if (digitalRead(waterPump) == 0)
-  {
-    Serial.println("<<<-contrPUMB {}");
-    digitalWrite(waterPump, HIGH);
-    Serial.println("->>>resRESULT {\"value\":true,\"msg\":\"Success\"}");
-    thisSerial.println("resRESULT {\"value\":true,\"msg\":\"Success\"}");
-  }
-  else
-  {
-    Serial.println("<<<-contrPUMB {}");
-    digitalWrite(waterPump, LOW);
-    Serial.println("->>>resRESULT {\"value\":true,\"msg\":\"Success\"}");
-    thisSerial.println("resRESULT {\"value\":true,\"msg\":\"Success\"}");
-  }
-}
-
-// -> set cho tớ chế độ máy bơm như này
-SerialCommand setPumbMode_("setPUMB", setPumbMode);
-// -> máy bơm mở/tắt cho tớ
-SerialCommand controlPumb_("contrPUMB", controlPumb);
-
-//================== AUTO MODE =====================================
-void autoMode()
-{
-  if (mositureValue < 35)
-    digitalWrite(waterPump, HIGH);
-  else
-    digitalWrite(waterPump, LOW);
-}
-
-//================== CHECK MOSITURE =================================
-void checkMositure()
-{
-  //Thay đổi độ ẩm nếu có gì khác
-  if (analogRead(mositureSensor) != mositureValue)
-  {
-    mositureValue = analogRead(mositureSensor);
-    mositureValue = map(mositureValue, 0, 1023, 100, 0);
-    resMositure();
-  }
-}
-
+//=============================== MAIN ===================================
 void setup()
 {
   // lcd.init();       //Khởi động màn hình. Bắt đầu cho phép Arduino sử dụng màn hình
@@ -210,9 +208,9 @@ void setup()
 
   //Khai báo xử lý khi có lệnh từ ESP8266
   sCmd.AddCommand(&getInfo_);
-  // sCmd.AddCommand(&getMositure_);
-  sCmd.AddCommand(&setPumbMode_);
-  sCmd.AddCommand(&controlPumb_);
+  sCmd.AddCommand(&getMositure_);
+  sCmd.AddCommand(&setCommand_);
+  // sCmd.AddCommand(&controlPumb_);
   //Khi đã xong
   Serial.println("Setup completed! I'm ready :)");
 }
@@ -220,9 +218,10 @@ void setup()
 void loop()
 {
   //Tự động tưới nếu cờ auto đang bật
-  checkMositure();
+  // checkMositure();
   if (pumbMode == true)
     autoMode();
+
   //Đọc lệnh được gửi từ ESP8266
   sCmd.ReadSerial();
 }
