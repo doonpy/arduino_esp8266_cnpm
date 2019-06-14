@@ -45,21 +45,33 @@ void autoMode()
 }
 
 //===================THÔNG TIN CHUNG=======================================
-void resInfo() //phản hồi yêu cầu độ ẩm của ESP8266
+void resInfo(char *port_str) //phản hồi yêu cầu độ ẩm của ESP8266
 {
   //Tao doi tuong Json
-  const int BUFFER_SIZE = JSON_OBJECT_SIZE(6);
-  String jsonCmd;
-  StaticJsonDocument<BUFFER_SIZE> jsonDoc; //Tao doi tuong JsonDoc
-  jsonDoc["status"] = "Ok";
-  jsonDoc["pumbMode"] = pumbMode;
-  jsonDoc["pumbStatus"] = pumbStatus;
-  serializeJson(jsonDoc, jsonCmd);          //Convert JSON -> String
-  thisSerial.println("resINFO " + jsonCmd); //gửi lệnh
+  const int capacity = JSON_OBJECT_SIZE(8);
+  String output;
+  StaticJsonDocument<capacity> docJson; //Tao doi tuong docJson
+  DeserializationError err = deserializeJson(docJson, port_str);
+
+  if (err)
+  {
+    Serial.print(F("deserializeJson() failed with code "));
+    Serial.println(err.c_str());
+    char msg[strlen("{\"status\":\"\",\"msg\":\"deserializeJson()_failed\"}") + strlen(err.c_str())];
+    sprintf(msg, "{\"status\":\"%s\",\"msg\":\"deserializeJson()_failed\"}", err.c_str());
+    thisSerial.print("resRESULT ");
+    thisSerial.println(msg);
+    return;
+  }
+  docJson["status"] = "Ok";
+  docJson["pumbMode"] = pumbMode;
+  docJson["pumbStatus"] = pumbStatus;
+  serializeJson(docJson, output);          //Convert JSON -> String
+  thisSerial.println("resINFO " + output); //gửi lệnh
 
   //Xuất ra monitor
   Serial.print("->>>");
-  Serial.println("resINFO " + jsonCmd);
+  Serial.println("resINFO " + output);
 }
 
 void getInfo(SerialCommands *sender)
@@ -75,11 +87,11 @@ void getInfo(SerialCommands *sender)
   }
 
   //Xuất ra monitor
-  Serial.print("<<<-getINFO");
+  Serial.print("<<<-getINFO ");
   Serial.println(port_str);
 
   //Gọi hàm phản hồiy
-  resInfo();
+  resInfo(port_str);
 }
 
 //Khởi tạo biến nhận lệnh từ ESP8266
@@ -93,17 +105,17 @@ void resMositure() //gửi độ ẩm cho ESP8266 nếu có thay đổi
   checkMositure();
 
   //Tao doi tuong Json
-  const int BUFFER_SIZE = JSON_OBJECT_SIZE(5);
-  String jsonCmd;
-  StaticJsonDocument<BUFFER_SIZE> jsonDoc; //Tao doi tuong JsonDoc
-  jsonDoc["status"] = "Ok";
-  jsonDoc["value"] = mositureValue;
-  serializeJson(jsonDoc, jsonCmd);          //Convert JSON -> String
-  thisSerial.println("resMOSI " + jsonCmd); //gửi lệnh
+  const int capacity = JSON_OBJECT_SIZE(5);
+  String output;
+  StaticJsonDocument<capacity> docJson; //Tao doi tuong docJson
+  docJson["status"] = "Ok";
+  docJson["value"] = mositureValue;
+  serializeJson(docJson, output);          //Convert JSON -> String
+  thisSerial.println("resMOSI " + output); //gửi lệnh
 
   //Xuất ra monitor
   Serial.print("->>>");
-  Serial.println("resMOSI " + jsonCmd);
+  Serial.println("resMOSI " + output);
 }
 
 void getMositure(SerialCommands *sender)

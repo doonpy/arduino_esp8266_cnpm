@@ -24,11 +24,11 @@ SoftwareSerial thisSerial(RX, TX, false, 256);
 //Khởi tạo lệnh
 SerialCommands sCmd(&thisSerial, serial_command_buffer_, sizeof(serial_command_buffer_), "\r\n", " "); // Khai báo biến sử dụng thư viện Serial Command
 //Khởi tạo client socket io
-SocketIoClient client;                                       //Khai bao socket client
-char host[] = "192.168.1.7";                                 //Địa chỉ IP socket server
-int port = 3000;                                             //Port của server
-const int FW_VERSION = 1245;                                 //version firmware
-const char *fwUrlBase = "http://192.168.1.7:3000/firmware/"; //đường dẫn chứa folder firmware
+SocketIoClient client;         //Khai bao socket client
+char host[] = "192.168.0.104"; //Địa chỉ IP socket server
+int port = 3000;               //Port của server
+const int FW_VERSION = 1245;   //version firmware
+// const char *fwUrlBase = "http://192.168.0.104/firmware/"; //đường dẫn chứa folder firmware
 
 //========================= CHẾ ĐỘ ĐIỂM TRUY CẬP (KHI KO TÌM ĐC WIFI NÀO) ======================================
 // Set web server port number to 80
@@ -67,8 +67,10 @@ void setClock()
 //gửi yêu cầu lấy thông tin cho arduino
 void getInfo(const char *payload, size_t length)
 {
-  Serial.println("->>>getINFO {}");
-  thisSerial.println("getINFO {}"); //gửi tên lệnh
+  Serial.print("->>>getINFO ");
+  Serial.println(payload);
+  thisSerial.print("getINFO "); //gửi tên lệnh
+  thisSerial.println(payload);
 }
 
 //Phản hồi với socket server
@@ -81,13 +83,32 @@ void resInfo(SerialCommands *sender)
     client.emit("resError", "{\"status\":\"NoPort\", \"msg\":\"No_port\"}");
     return;
   }
-
   //Xuất ra monitor
-  Serial.print("<<<- ");
+  Serial.print("<<<-resINFO ");
   Serial.println(port_str);
 
+  //JSON handle
+  const int capacity = JSON_OBJECT_SIZE(8);
+  StaticJsonDocument<capacity> docJson;
+  DeserializationError err = deserializeJson(docJson, port_str);
+
+  if (err)
+  {
+    Serial.print(F("deserializeJson() failed with code "));
+    Serial.println(err.c_str());
+    char msg[strlen("{\"status\":\"\",\"msg\":\"deserializeJson()_failed\"}") + strlen(err.c_str())];
+    sprintf(msg, "{\"status\":\"%s\",\"msg\":\"deserializeJson()_failed\"}", err.c_str());
+    client.emit("resError", msg);
+    return;
+  }
+
+  //Thêm phiên bản vào
+  String output;
+  docJson["firmware"] = FW_VERSION;
+  serializeJson(docJson, output);
+
   //Gửi cho socket server
-  client.emit("resInfomation", port_str);
+  client.emit("resInfomation", output.c_str());
 }
 //tao lenh rieng
 SerialCommand resInfo_("resINFO", resInfo);
@@ -190,6 +211,9 @@ SerialCommand resResult_("resRESULT", resResult);
 //=========================== UPDATE FIRMWARE =========================
 void checkForUpdates()
 {
+  const String portTemp = String(port);
+  char fwUrlBase[strlen("http:///firmware/") + strlen(host) + strlen(portTemp.c_str())];
+  sprintf(fwUrlBase, "http://%s:%s/firmware/", host, portTemp.c_str());
   String fwURL = String(fwUrlBase);
   fwURL.concat("firmware");
   String fwVersionURL = fwURL;
@@ -258,11 +282,11 @@ void updateFirmware(const char *payload, size_t length)
 }
 
 //============================ AUTHORIZATION ==========================
-void getAuthorization(const char *payload, size_t length)
+void resAuthorization(const char *payload, size_t length)
 {
   char msg[strlen("{\"type\":false,\"mac\":\"\"}") + strlen(WiFi.macAddress().c_str())];
   sprintf(msg, "{\"type\":false,\"mac\":\"%s\"}", WiFi.macAddress().c_str());
-  client.emit("resAuthorization", msg);
+  client.emit("resAuth", msg);
 }
 
 void setup()
@@ -289,11 +313,11 @@ void setup()
   // setClock();
 
   //Với socketserver - lắng nghe socket server ra lệnh
-  client.on("getInfomation", getInfo);             //yêu cầu lấy thông tin của thiết bị Arduino
-  client.on("getMositure", getMositure);           //yêu cầu lấy độ ẩm
-  client.on("setCommand", setCommnand);            //gửi lệnh setting các thông số Arduino
-  client.on("updateFirmware", updateFirmware);     //gửi lệnh update Firmware
-  client.on("getAuthorization", getAuthorization); //xác thực mình là device
+  client.on("getInfomation", getInfo);         //yêu cầu lấy thông tin của thiết bị Arduino
+  client.on("getMositure", getMositure);       //yêu cầu lấy độ ẩm
+  client.on("setCommand", setCommnand);        //gửi lệnh setting các thông số Arduino
+  client.on("updateFirmware", updateFirmware); //gửi lệnh update Firmware
+  client.on("getAuth", resAuthorization);      //gửi lệnh update Firmware
   //Kết nối với socket server
   client.begin(host, port);
 
@@ -304,6 +328,9 @@ void setup()
 
   //Check update firmware
   checkForUpdates();
+
+  //Cho biết tao là ai
+  // resAuthorization();
 
   Serial.println("Da san sang nhan lenh");
 }
