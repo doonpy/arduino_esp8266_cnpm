@@ -101,7 +101,7 @@ void resInfo()
   Serial.println(port_str);
 
   //JSON handle
-  const int capacity = JSON_OBJECT_SIZE(5);
+  const int capacity = JSON_OBJECT_SIZE(7);
   StaticJsonDocument<capacity> docJson;
   DeserializationError err = deserializeJson(docJson, port_str);
 
@@ -122,6 +122,7 @@ void resInfo()
 
   //Gửi cho socket server
   client.emit("resInfomation", output.c_str());
+  sCmd.clearBuffer();
 }
 //tao lenh rieng
 // SerialCommand resInfo_("resINFO", resInfo);
@@ -152,7 +153,7 @@ void resMositure()
   Serial.println(port_str);
 
   //JSON handle
-  const int capacity = JSON_OBJECT_SIZE(10);
+  const int capacity = JSON_OBJECT_SIZE(6);
   StaticJsonDocument<capacity> docJson;
   DeserializationError err = deserializeJson(docJson, port_str);
 
@@ -183,7 +184,6 @@ void resMositure()
 //Set trạng thái máy bơm và chế độ tưới
 void setCommand(const char *payload, size_t length)
 {
-  sCmd.clearBuffer();
   Serial.print("->>>setCMD ");
   Serial.println(payload);
   thisSerial.print("setCMD"); //gửi tên lệnh
@@ -200,7 +200,7 @@ void resResult()
   if (port_str == NULL)
   {
     Serial.println("ERROR NO_PORT");
-    client.emit("resError", "{\"status\":\"NoPort\", \"msg\":\"No_port\"}");
+    client.emit("resResult", "{\"status\":\"NoPort\", \"msg\":\"No_port\"}");
     return;
   }
   Serial.print("<<<-resRESU ");
@@ -217,25 +217,42 @@ void resResult()
     Serial.println(err.c_str());
     char msg[strlen("{\"status\":\"\",\"msg\":\"deserializeJson()_failed\"}") + strlen(err.c_str())];
     sprintf(msg, "{\"status\":\"%s\",\"msg\":\"deserializeJson()_failed\"}", err.c_str());
-    client.emit("resError", msg);
+    client.emit("resResult", msg);
     return;
   }
 
-  if (docJson["status"] == "Ok")
-  {
-    String output;
-    serializeJson(docJson, output);
-    client.emit("resResult", output.c_str());
-  }
-  else
-  {
-    String output;
-    serializeJson(docJson, output);
-    client.emit("resResult", output.c_str());
-  }
+  // if (docJson["status"] == "Ok")
+  // {
+  String output;
+  serializeJson(docJson, output);
+  client.emit("resResult", output.c_str());
+  // }
+  // else
+  // {
+  //   String output;
+  //   serializeJson(docJson, output);
+  //   client.emit("resError", output.c_str());
+  // }
 }
 
 // SerialCommand resResult_("resRESU", resResult);
+
+//======================= LỖI ===================================
+void resError()
+{
+  //Lấy data
+  char *port_str = sCmd.next();
+  if (port_str == NULL)
+  {
+    Serial.println("ERROR NO_PORT");
+    client.emit("resError", "{\"status\":\"NoPort\", \"msg\":\"No_port\"}");
+    return;
+  }
+  Serial.print("<<<-resERR ");
+  Serial.println(port_str);
+
+  client.emit("resError", port_str);
+}
 
 //=========================== UPDATE FIRMWARE =========================
 void checkForUpdates()
@@ -311,12 +328,11 @@ void updateFirmware(const char *payload, size_t length)
 }
 
 //This is the default handler, and gets called when no other command matches.
-// void cmdUnrecognized(SerialCommands *sender, const char *cmd)
-// {
-//   sender->GetSerial()->print("Unrecognized command [");
-//   sender->GetSerial()->print(cmd);
-//   sender->GetSerial()->println("]");
-// }
+void unrecognized(String cmd)
+{
+  Serial.print("==> ERROR: Unrecognized command ");
+  Serial.println(cmd);
+}
 
 //============================ AUTHORIZATION ==========================
 void getAuthorization(const char *payload, size_t length)
@@ -368,7 +384,10 @@ void setup()
   sCmd.addCommand("resINFO", resInfo);
   sCmd.addCommand("resMOSI", resMositure);
   sCmd.addCommand("resRESU", resResult);
+  sCmd.addCommand("resERR", resError);
+  sCmd.addDefaultHandler(unrecognized);
 }
+
 
 void loop()
 {
